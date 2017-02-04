@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 -- http://stackoverflow.com/questions/32579133/simplest-non-trivial-monad-transformer-example-for-dummies-iomaybe
 module Main where
 import Control.Exception
@@ -18,6 +20,11 @@ import CountEntries(
   demoCountEntries)
 -- gotcha: for an Either to be an instance of Show,
 -- both types must be instances of Show
+
+import qualified Control.Monad.Reader as X
+import qualified Control.Monad.Except as X
+import qualified Control.Monad.IO.Class as X
+
 
 newtype MyError = MyError String deriving Show
 
@@ -195,7 +202,7 @@ recursiveProcedure = do
     x <- recursiveProcedure
     return ([s, s*s] ++ x)
   else
-    return [] 
+    return []
 
 -- ghci> evalState recursiveProcedure 5
 -- ghci> runState recursiveProcedure 5
@@ -292,13 +299,74 @@ mainT = do
   myfunctionT a b
 
 
-mainInteractive :: ExceptT MyError IO String
+type Config = (Int,Int)
+
+-- type App a = ExceptT MyError IO a
+type App a = ReaderT Config (ExceptT MyError IO) a
+
+-- ReaderT r m a  ~  r -> m a
+-- ExceptT e m a  ~  m (Either e a)
+
+-- ReaderT Config (ExceptT MyError IO) a
+--      ~  Config -> (ExceptT MyError IO) a
+--      ~  Config -> IO (Either MyError a)
+--
+--      ~  ReaderT (x :: Config -> (ExceptT MyError IO) a)
+--      ~  ReaderT (x :: Config -> ExceptT (y :: IO (Either MyError a)))
+
+-- ExceptT MyError (ReaderT Config IO) a
+--      ~  (ReaderT Config IO) (Either MyError a)
+--      ~  Config -> IO (Either MyError a)
+--
+--      ~ ExceptT (x :: (ReaderT Config IO) (Either MyError a))
+--      ~ ExceptT (x :: ReaderT (y :: Config -> IO (Either MyError a)))
+
+
+readLine = read <$> getLine
+
+-- for logging, use Katip
+
+{-
+mainInteractive :: App String
 mainInteractive = do
   a <- myvalueT
   --b <- ExceptT $ Right <$> read <$> getLine
-  b <- lift $ read <$> getLine
+  b <- lift readLine
   myfunctionT a b
+-}
 
+mainInteractive :: App String
+mainInteractive = do
+  a <- lift myvalueT
+  (x,y) <- ask
+  lift . lift $ print (x,y)
+  --b <- ExceptT $ Right <$> read <$> getLine
+  b <- lift . lift $ readLine
+  lift $ myfunctionT a b
+
+
+-- for reference: type App a = ReaderT Config (ExceptT MyError IO) a
+-- myvalueT ::  ExceptT MyError IO Int
+-- myfunctionT :: Int -> Int -> ExceptT MyError IO String
+
+myvalueT' :: X.MonadError MyError m => m Int
+myvalueT' = undefined
+
+myfunctionT' :: X.MonadError MyError m => Int -> Int -> m String
+myfunctionT' = undefined
+
+print' :: (Show a,X.MonadIO m) => a -> m ()
+print' = X.liftIO . print
+
+mainInteractiveMtl
+    :: (X.MonadError MyError m, X.MonadReader Config m, X.MonadIO m)
+    => m String
+mainInteractiveMtl = do
+  a <- myvalueT'
+  (x,y) <- X.ask
+  print' (x,y)
+  b <- X.liftIO readLine
+  myfunctionT' a b
 
 
 
@@ -333,7 +401,7 @@ main = do
 
 main10 :: IO ()
 main10 = do
-  w738 <- runExceptT mainInteractive
+  w738 <- runExceptT (runReaderT mainInteractive (10,20))
   print w738
 
 
@@ -391,21 +459,21 @@ doowhile predicate action = do
 getMaybeInt :: IO (Maybe Int)
 getMaybeInt = do
   putStrLn "enter an Int:"
-  str <- getLine 
+  str <- getLine
   return $ readMaybe str
 
 
 insistInt :: IO Int
 insistInt = do
   jst <- doowhile (isNothing) getMaybeInt
-  case jst of 
+  case jst of
     Just x -> return x
     Nothing -> fail "This should never happen"
 
 insistInt2 :: IO Int
 insistInt2 = do
   jst <- iterateWhile (isNothing) getMaybeInt
-  case jst of 
+  case jst of
     Just x -> return x
     Nothing -> fail "This should never happen"
 
@@ -444,7 +512,5 @@ tryexample = do
   -- either <- try (evaluate (exceptionElemAt [3,4,5] 4)) :: IO (Either SomeException Int)
   case either of
     Left e -> print "Error tom"
-    Right x -> print (x + 2) 
+    Right x -> print (x + 2)
   return ()
-  
-
